@@ -1,109 +1,92 @@
-# App Dropbox (app folder)
+# dropbox-sync
+
+A small Python app that keeps a local folder in sync with a folder on your
+**Dropbox**. Built for a single user who wants a simple, manual **push/pull**
+workflow between a few devices (desktop + phone/tablet).
+
+It uses a Dropbox **app-folder** app, so it only ever sees its own folder
+(`Dropbox/Apps/<Your App Name>/`).
 
 ## Setup
+
 ```bash
 pip install dropbox
 ```
 
-## Esegui
-```bash
-python dropbox_app.py
-```
-
-## Come funziona
-- La **prima volta** apre il link nel browser → autorizzi l'app → incolli il codice → viene salvato `refresh_token.txt`
-- Dalle volte successive si ricollega da solo, senza chiedere nulla
-
-## Cosa può vedere
-Un'app **single folder** vede **solo** la propria cartella:
-```
-Dropbox/Apps/<Nome della tua app>/
-```
-Per usare i file del tuo link condiviso (`rlkey=...`) devi **caricarli in quella cartella** — l'app non può accedere a cartelle condivise esterne. Puoi:
-- caricare i file da questa app (basta aggiungere una riga con `files_upload`)
-- oppure andare sul sito Dropbox e spostare i file dentro `Apps/<Nome App>/`
-
-## Comandi utili
-```python
-# Upload
-with open("file.jpg", "rb") as f:
-    dbx.files_upload(f.read(), "/file.jpg", mute=True)
-
-# Download
-dbx.files_download_to_file("copia.jpg", "/file.jpg")
-```
-
-## Sincronizzazione locale <-> remota
-Oltre alla versione minima (`dropbox_app.py`), è disponibile uno script di
-**sincronizzazione** tra una cartella locale `drpbx/` e il folder remoto
-dell'app, pensato per un flusso **manuale tipo push/pull** (utente unico).
+## Getting started
 
 ```bash
-python sync.py push          # locale -> remoto  (a fine sessione)
-python sync.py pull          # remoto -> locale  (al ritorno ad altro device)
-python sync.py               # bidirezionale, una passata
-python sync.py push --dry-run # anteprima senza modificare nulla
+python dropbox_app.py     # connect and list the app folder
 ```
 
-### Come funziona
-- **Remote → locale**: scarica i file assenti o più nuovi su Dropbox
-- **Locale → remoto**: carica i file assenti o più nuovi in locale
-- Il confronto usa la **data di modifica** (`mtime` locale vs `server_modified` remoto)
+- **First run**: opens a link in your browser → authorise → paste the code
+  back. The refresh token is saved to `~/.mydrpbx/refresh_token.txt`.
+- **Later runs**: reconnects automatically with no prompts.
 
-### Flusso consigliato con più device
-1. Lavori su una macchina (Windows/Linux) → a fine sessione: `python sync.py push`
-2. Su smartphone/tablet apri l'app **Dropbox** > `Apps/<Nome App>/` per vedere/modificare i file (li: non serve Python)
-3. Di ritorno su un desktop: `python sync.py pull` per scaricare le modifiche
+> **Secrets live outside the app**, in `~/.mydrpbx/` (`config.json` +
+> `refresh_token.txt`), so this repo contains **no credentials** and is safe
+> to share. Copy that folder to each machine you run the app on.
 
-Il server Dropbox imposta `server_modified`, quindi il confronto resta coerente
-anche se i device hanno orologi diversi.
+## Syncing: push / pull
 
-### Termux (Android: smartphone/tablet)
-Il **refresh token è legato all'app+account, non al device**: puoi **riusare lo
-stesso `refresh_token.txt`** su tutti i device senza rifare OAuth (trattalo però
-come una password: chi lo possiede accede al tuo folder).
+The `sync.py` script mirrors `drpbx/` with the Dropbox app folder, using a
+manual push/pull model (ideal when you're the only editor).
 
-Setup rapido su Termux:
 ```bash
-bash setup_termux.sh          # installa python + dropbox, crea drpbx/
-# poi copia qui gli script (sync.py, dbx_auth.py, refresh_token.txt)
-# oppure scaricali facendo il primo pull da Desktop (vedi bootstrap qui sotto)
-python sync.py pull           # prima sync: scarica tutto
-python sync.py push           # a fine sessione di modifica
+python sync.py push           # local -> Dropbox  (end of a session)
+python sync.py pull           # Dropbox -> local  (back on another device)
+python sync.py                # both directions, one pass
+python sync.py push --dry-run # preview without changing anything
 ```
 
-Se i file servono nello storage "normale" del telefono: `termux-setup-storage`.
+How it decides what to copy:
+- **Remote → local**: files missing locally or newer on Dropbox.
+- **Local → remote**: files missing remotely or newer locally.
+- Comparison is based on **modification time** (`mtime` vs `server_modified`).
 
-### Bootstrap degli script sui nuovi device
-Per portare `sync.py`/`dbx_auth.py` sugli altri device senza git/usb:
-1. Da un desktop: carica una cartella `scripts/` nell'app folder (`sync.py`, `dbx_auth.py`, `refresh_token.txt`)
-2. Su Termux: `bash setup_termux.sh` e poi `python sync.py pull`
-3. Sposta gli script da `drpbx/scripts/` alla HOME e cancella `scripts/`
+Because Dropbox sets `server_modified` on its own clock, the comparison stays
+consistent even when devices have different clocks.
 
-### File del progetto
-- `dbx_auth.py` — autenticazione OAuth condivisa (app key + PKCE, riutilizzabile)
-- `dropbox_app.py` — versione minima: connessione ed elenco cartella
-- `sync.py` — sync bidirezionale o push/pull manuale
-- `setup_termux.sh` — installer one-shot per Termux/Android
+### Suggested multi-device flow
+1. Work on a desktop (Windows/Linux) → at the end: `python sync.py push`
+2. On a phone/tablet, open the **Dropbox app** > `Apps/<Your App Name>/` to
+   view or edit the files (no Python needed there)
+3. Back on a desktop: `python sync.py pull` to fetch the changes
 
-### Nota tecnica: timezone
-Le date `server_modified` di Dropbox sono in **UTC ma naive** (senza timezone).
-Convertendole con `.timestamp()` Python le interpreta come ora locale, generando
-una discrepanza (es. +2h) che causava un loop infinito di ri-upload/ri-download.
-Risolto dichiarando esplicitamente UTC prima della conversione e allineando la
-data locale a quella remota dopo ogni download/upload.
+### Termux (Android)
+The refresh token is tied to your app + account, **not** to a device, so the
+same `~/.mydrpbx/refresh_token.txt` works on every device — no re-authorising.
+Treat it like a password: anyone with it can reach your folder.
 
-## Nota: futura implementazione delle rimozioni (TODO)
-Attualmente la sync **copre solo contenuto e modifiche**, non le eliminazioni:
-- se cancelli un file **su Dropbox**, il file resta in `drpbx/` (e verrebbe
-  ri-caricato al run successivo);
-- se cancelli un file **in `drpbx/`**, resta su Dropbox (e verrebbe ri-scaricato).
+```bash
+bash setup_termux.sh      # installs python + dropbox, creates drpbx/
+python sync.py pull       # first sync: fetch everything
+python sync.py push       # end of an editing session
+```
 
-Implementazione prevista (richiede scope `files.metadata.write` per `files_delete`):
-1. Confrontare l'elenco dei file locali e remoti, invece che solo per percorso.
-2. Se un file esiste solo in un lato e non era mai stato visto, è "nuovo" e va
-   copiato; se invece era già sincronizzato in precedenza, la sua assenza indica
-   una cancellazione da propagare all'altro lato.
-3. Per distinguere i due casi servirebbe uno **stato di sync persistente**
-   (es. un file `sync_state.json` che registra l'ultimo elenco sincronizzato),
-   così non si rischia di cancellare file appena aggiunti o mai visti prima.
+If you want files in normal phone storage instead: `termux-setup-storage`.
+
+## Project files
+
+- `dbx_auth.py` — shared OAuth (app key + PKCE), reads secrets from `~/.mydrpbx`
+- `dropbox_app.py` — minimal: connect and list the app folder
+- `sync.py` — one-way push/pull or two-way sync
+- `setup_termux.sh` — one-shot installer for Termux/Android
+
+## Notes
+
+### Timezone
+Dropbox returns `server_modified` in **UTC but naive** (no timezone). Calling
+`.timestamp()` on it makes Python read it as local time, causing a small offset
+(here +2h) that produced a re-upload/re-download loop. Fixed by treating it
+explicitly as UTC and aligning local timestamps after every sync.
+
+### Deletions (TODO)
+The sync currently handles **content and edits only**, not deletions:
+- a file deleted **on Dropbox** stays in `drpbx/` (and comes back on next push),
+- a file deleted **in `drpbx/`** stays on Dropbox (and comes back on next pull).
+
+Planned (needs `files.metadata.write` scope for `files_delete`): compare lists
+of files rather than just paths, and use a **persistent sync state** (e.g.
+`sync_state.json`) to tell "new file to copy" apart from "removed file to
+propagate", so you never delete a file you've never seen.
