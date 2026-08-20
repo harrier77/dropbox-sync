@@ -1,0 +1,25 @@
+# ============================================================================
+# CARTELLA DI SINCRONIZZAZIONE DROPBOX (da NON caricare su GitHub)
+# Il contenuto di drpbx/ è il payload sincronizzato col folder remoto.
+# Contiene dati utente, non codice: va escluso dal repository.
+# ============================================================================
+drpbx/
+
+# ---------------------------------------------------------------------------
+# Segreti (ora fuori dalla cartella dell'app, in ~/.mydrpbx)
+# Si ignorano comunque per sicurezza, nel caso finissero in locale.
+# ---------------------------------------------------------------------------
+.mydrpbx/
+refresh_token.txt
+config.json
+*.token
+
+# ---------------------------------------------------------------------------
+# Python handling
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
