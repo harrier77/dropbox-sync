@@ -7,6 +7,8 @@ workflow between a few devices (desktop + phone/tablet).
 It uses a Dropbox **app-folder** app, so it only ever sees its own folder
 (`Dropbox/Apps/<Your App Name>/`).
 
+**License:** [MIT](LICENSE)
+
 ## Setup
 
 ```bash
