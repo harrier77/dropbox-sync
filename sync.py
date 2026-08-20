@@ -49,11 +49,21 @@ def build_indexes(dbx):
             remote[e.path_display.lstrip("/")] = e
 
     local = {}
-    for root, _dirs, fnames in os.walk(LOCAL):
-        for fn in fnames:
-            p = os.path.join(root, fn)
-            rel = os.path.relpath(p, LOCAL)
-            local[rel.replace(os.sep, "/")] = p
+    seen = {os.path.realpath(LOCAL)}   # evita cicli di symlink
+
+    def walk_dir(base, rel_prefix=""):
+        for entry in os.scandir(base):
+            rp = os.path.realpath(entry.path)
+            if rp in seen:
+                continue
+            seen.add(rp)
+            rel = entry.name if not rel_prefix else f"{rel_prefix}/{entry.name}"
+            if entry.is_dir():          # follow_symlinks=True di default: entra anche nei symlink-dir
+                walk_dir(entry.path, rel)
+            else:
+                local[rel] = entry.path
+
+    walk_dir(LOCAL)
     return local, remote
 
 
