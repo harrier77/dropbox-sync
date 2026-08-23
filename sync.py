@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Sincronizzazione (bidirezionale o unidirezionale) tra la cartella locale
 `drpbx` e il folder remoto della tua app Dropbox
