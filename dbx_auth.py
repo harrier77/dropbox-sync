@@ -18,6 +18,7 @@ CONFIG_FILE = os.path.join(SECRET_DIR, "config.json")
 
 APP_KEY = None
 SCOPE = None
+WORKING_FOLDER = None
 
 
 def _load_config():
@@ -26,6 +27,9 @@ def _load_config():
         cfg = json.load(f)
     APP_KEY = cfg["app_key"]
     SCOPE = cfg.get("scopes", [])
+    wf = cfg.get("working-folder")
+    if wf:
+        WORKING_FOLDER = os.path.expandvars(os.path.expanduser(wf))
 
 
 def get_token():

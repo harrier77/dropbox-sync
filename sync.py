@@ -20,8 +20,19 @@ import dropbox
 from dropbox import files
 import dbx_auth
 
-LOCAL = "drpbx"      # cartella locale
 REMOTE = "/"         # root del folder dell'app su Dropbox
+
+
+def _resolve_local():
+    """Cartella locale: 'working-folder' dal config se presente,
+    altrimenti 'drpbx' accanto a questo script."""
+    wf = getattr(dbx_auth, "WORKING_FOLDER", None)
+    if wf:
+        return os.path.abspath(wf)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "drpbx")
+
+
+LOCAL = _resolve_local()
 
 
 def server_epoch(md):
@@ -112,7 +123,7 @@ def main(mode="both", dry=False):
             "pull": "remoto -> locale",
             "both": "bidirezionale"}[mode]
     what = " (DRY-RUN)" if dry else ""
-    print(f"Sync {desc} tra '{LOCAL}/' e '/'{what}\n" + "-" * 40)
+    print(f"Sync {desc} tra '{LOCAL}{os.sep}' e '/'{what}\n" + "-" * 40)
 
     local, remote = build_indexes(dbx)
     if mode == "pull":
