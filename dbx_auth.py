@@ -22,7 +22,7 @@ WORKING_FOLDER = None
 
 
 def _load_config():
-    global APP_KEY, SCOPE
+    global APP_KEY, SCOPE, WORKING_FOLDER
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     APP_KEY = cfg["app_key"]

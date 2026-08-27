@@ -29,10 +29,10 @@ def _resolve_local():
     wf = getattr(dbx_auth, "WORKING_FOLDER", None)
     if wf:
         return os.path.abspath(wf)
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "drpbx")
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "drpbx")
 
 
-LOCAL = _resolve_local()
+LOCAL = None  # risolta in main(), dopo che dbx_auth ha caricato il config
 
 
 def server_epoch(md):
@@ -116,8 +116,10 @@ def upload(dbx, local, remote, dry=False):
 
 
 def main(mode="both", dry=False):
+    global LOCAL
+    dbx = dbx_auth.get_dbx()        # carica la config (imposta WORKING_FOLDER)
+    LOCAL = _resolve_local()        # ora può leggere working-folder dal config
     os.makedirs(LOCAL, exist_ok=True)
-    dbx = dbx_auth.get_dbx()
 
     desc = {"push": "locale -> remoto",
             "pull": "remoto -> locale",
