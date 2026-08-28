@@ -146,3 +146,5 @@ if __name__ == "__main__":
     args = argp.parse_args(sys.argv[1:])
 
     main(args.mode, args.dry_run)
+    
+    #input("Premi INVIO per uscire dalla shell...")
