@@ -32,9 +32,14 @@ def _load_config():
         WORKING_FOLDER = os.path.expandvars(os.path.expanduser(wf))
 
 
-def get_token():
+def get_token(interactive=True):
     if os.path.exists(TOKEN_FILE):
-        return open(TOKEN_FILE).read().strip()
+        with open(TOKEN_FILE, encoding="utf-8") as token_file:
+            token = token_file.read().strip()
+        if token:
+            return token
+    if not interactive:
+        raise RuntimeError("Autenticazione Dropbox necessaria: eseguire dbx_auth da terminale.")
     if APP_KEY is None:
         _load_config()
     auth = DropboxOAuth2FlowNoRedirect(
@@ -47,14 +52,20 @@ def get_token():
     return oauth.refresh_token
 
 
-def get_dbx():
+def get_dbx(interactive=True):
     if APP_KEY is None:
         _load_config()
+    dbx = dropbox.Dropbox(
+        oauth2_refresh_token=get_token(interactive=interactive), app_key=APP_KEY,
+        timeout=60,
+    )
     try:
-        dbx = dropbox.Dropbox(oauth2_refresh_token=get_token(), app_key=APP_KEY)
-        dbx.files_list_folder("")  # verifica che il token funzioni
+        dbx.files_list_folder("")
         return dbx
     except dropbox.exceptions.AuthError as e:
+        dbx.close()
+        if not interactive:
+            raise RuntimeError("Autenticazione Dropbox non valida: riautorizzare da terminale.") from e
         if "missing_scope" in str(e):
             print("Token senza i permessi necessari: rigenero...")
             if os.path.exists(TOKEN_FILE):

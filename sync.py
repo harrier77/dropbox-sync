@@ -43,7 +43,7 @@ def server_epoch(md):
 def list_all(dbx, path):
     """Restituisce tutti gli entry (con paginazione)."""
     entries = []
-    res = dbx.files_list_folder(path, recursive=True)
+    res = dbx.files_list_folder(path.rstrip("/"), recursive=True)
     entries += res.entries
     cursor = res.cursor
     while res.has_more:
@@ -53,15 +53,46 @@ def list_all(dbx, path):
     return entries
 
 
-def build_indexes(dbx):
+def _local_path(root, rel):
+    """Ritorna il path locale per un relpath, con traversal check.
+
+    Usa normpath (non realpath) per il containment check: un symlink dentro
+    la root (es. drpbx/target -> translator/target) e' legittimo e non va
+    risolto, altrimenti il check sembra un escape.
+    """
+    parts = rel.split("/")
+    if not rel or any(p in ("", "..") or "\\" in p or ":" in p for p in parts):
+        raise ValueError("Percorso di sincronizzazione non valido")
+    path = os.path.normpath(os.path.join(root, *parts))
+    root_norm = os.path.normpath(root)
+    if path != root_norm and not path.startswith(root_norm + os.sep):
+        raise ValueError("Percorso fuori dalla cartella selezionata")
+    return path
+
+
+def build_indexes(dbx, local_dir=None, remote_dir=None):
     """Indici locali e remoti: relpath -> (percorso locale | FileMetadata)."""
+    root = local_dir if local_dir is not None else LOCAL
+    remote_root = (remote_dir if remote_dir is not None else REMOTE).rstrip("/")
+    prefix = remote_root + "/"
     remote = {}
-    for e in list_all(dbx, REMOTE):
+    try:
+        entries = list_all(dbx, remote_root)
+    except dropbox.exceptions.ApiError as exc:
+        if exc.error.is_path() and exc.error.get_path().is_not_found():
+            entries = []
+        else:
+            raise
+    for e in entries:
         if isinstance(e, files.FileMetadata):
-            remote[e.path_display.lstrip("/")] = e
+            if not e.path_display.lower().startswith(prefix.lower()):
+                raise ValueError("Percorso remoto fuori dalla cartella selezionata")
+            rel = e.path_display[len(prefix):]
+            _local_path(root, rel)
+            remote[rel] = e
 
     local = {}
-    seen = {os.path.realpath(LOCAL)}   # evita cicli di symlink
+    seen = {os.path.realpath(root)}   # evita cicli di symlink
 
     def walk_dir(base, rel_prefix=""):
         for entry in os.scandir(base):
@@ -70,23 +101,77 @@ def build_indexes(dbx):
                 continue
             seen.add(rp)
             rel = entry.name if not rel_prefix else f"{rel_prefix}/{entry.name}"
+            if local_dir is not None:
+                _local_path(root, rel)
+            if entry.name.endswith(".tmp"):
+                continue
             if entry.is_dir():          # follow_symlinks=True di default: entra anche nei symlink-dir
                 walk_dir(entry.path, rel)
             else:
                 local[rel] = entry.path
 
-    walk_dir(LOCAL)
+    walk_dir(root)
     return local, remote
 
 
-def download(dbx, remote, local, dry=False):
+def run_sync(mode, dry=False, local_dir=None, remote_dir=None,
+             progress=None):
+    """Esegue la sincronizzazione e ritorna un riepilogo (dict).
+
+    mode: "push", "pull" o "both"; dry=True non modifica nulla.
+    local_dir: cartella locale da sincronizzare (default: LOCAL risolta).
+    remote_dir: cartella remota (default: REMOTE, root dell'app).
+    progress: callback opzionale(message:str) per log senza print.
+    """
+    def emit(msg):
+        if progress:
+            progress(msg)
+        else:
+            print(msg)
+
+    dbx = dbx_auth.get_dbx(interactive=False)
+    if local_dir is None:
+        local_dir = LOCAL if LOCAL is not None else _resolve_local()
+    if remote_dir is None:
+        remote_dir = REMOTE
+    local_dir = os.path.abspath(local_dir)
+    os.makedirs(local_dir, exist_ok=True)
+
+    desc = {"push": "locale -> remoto",
+            "pull": "remoto -> locale",
+            "both": "bidirezionale"}[mode]
+    what = " (DRY-RUN)" if dry else ""
+    emit(f"Sync {desc} tra '{local_dir}{os.sep}' e '{remote_dir}'{what}")
+
+    local, remote = build_indexes(dbx, local_dir=local_dir, remote_dir=remote_dir)
+    down = up = 0
+    if mode == "pull":
+        down = download(dbx, remote, local, dry, root=local_dir, progress=emit)
+    elif mode == "push":
+        up = upload(dbx, local, remote, dry, root=local_dir, progress=emit)
+    else:
+        down = download(dbx, remote, local, dry, root=local_dir, progress=emit)
+        up = upload(dbx, local, remote, dry, root=local_dir, progress=emit)
+    emit(f"Fatto: {down} scaricati, {up} caricati.")
+    return {"mode": mode, "dry": bool(dry), "downloaded": down, "uploaded": up}
+
+
+def download(dbx, remote, local, dry=False, root=None, progress=None):
     """Remote -> locale. Restituisce il numero di file scaricati."""
+    base = root if root is not None else LOCAL
+
+    def emit(msg):
+        if progress:
+            progress(msg)
+        else:
+            print(msg)
+
     n = 0
     for rel, md in remote.items():
-        local_p = os.path.join(LOCAL, rel.replace("/", os.sep))
+        local_p = _local_path(base, rel)
         current = os.path.getmtime(local_p) if rel in local else 0
         if rel not in local or current < server_epoch(md):
-            print(("  [dry] DOWN " if dry else "  DOWN  ") + rel)
+            emit(("  [dry] DOWN " if dry else "  DOWN  ") + rel)
             n += 1
             if not dry:
                 os.makedirs(os.path.dirname(local_p), exist_ok=True)
@@ -96,13 +181,19 @@ def download(dbx, remote, local, dry=False):
     return n
 
 
-def upload(dbx, local, remote, dry=False):
+def upload(dbx, local, remote, dry=False, root=None, progress=None):
     """Locale -> remoto. Restituisce il numero di file caricati."""
+    def emit(msg):
+        if progress:
+            progress(msg)
+        else:
+            print(msg)
+
     n = 0
     for rel, local_p in local.items():
         rm = remote.get(rel)
         if rm is None or os.path.getmtime(local_p) > server_epoch(rm):
-            print(("  [dry] UP   " if dry else "  UP    ") + rel)
+            emit(("  [dry] UP   " if dry else "  UP    ") + rel)
             n += 1
             if not dry:
                 with open(local_p, "rb") as f:
@@ -116,28 +207,7 @@ def upload(dbx, local, remote, dry=False):
 
 
 def main(mode="both", dry=False):
-    global LOCAL
-    dbx = dbx_auth.get_dbx()        # carica la config (imposta WORKING_FOLDER)
-    LOCAL = _resolve_local()        # ora può leggere working-folder dal config
-    os.makedirs(LOCAL, exist_ok=True)
-
-    desc = {"push": "locale -> remoto",
-            "pull": "remoto -> locale",
-            "both": "bidirezionale"}[mode]
-    what = " (DRY-RUN)" if dry else ""
-    print(f"Sync {desc} tra '{LOCAL}{os.sep}' e '/'{what}\n" + "-" * 40)
-
-    local, remote = build_indexes(dbx)
-    if mode == "pull":
-        n = download(dbx, remote, local, dry)
-        print(f"\nFatto: {n} scaricati.")
-    elif mode == "push":
-        n = upload(dbx, local, remote, dry)
-        print(f"\nFatto: {n} caricati.")
-    else:
-        d = download(dbx, remote, local, dry)
-        u = upload(dbx, local, remote, dry)
-        print(f"\nFatto: {d} scaricati, {u} caricati.")
+    run_sync(mode, dry=dry)
 
 
 if __name__ == "__main__":
